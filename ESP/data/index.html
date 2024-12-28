@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32-C3 波形控制器</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .container {
+            width: 80%;
+            margin: 20px auto;
+            font-family: Arial, sans-serif;
+        }
+        .control-panel, .oscilloscope-panel {
+            margin: 20px 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            border-radius: 8px;
+        }
+        .button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+        }
+        .button:hover {
+            background-color: #45a049;
+        }
+        .button.active {
+            background-color: #45a049;
+        }
+        .button.stop {
+            background-color: #f44336;
+        }
+        .button.stop:hover {
+            background-color: #da190b;
+        }
+        .freq-control {
+            margin: 20px 0;
+        }
+        #status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ESP32-C3 波形控制器</h1>
+        <div id="status">状态: 等待连接...</div>
+        
+        <div class="oscilloscope-panel">
+            <h2>示波器显示</h2>
+            <canvas id="voltageChart"></canvas>
+        </div>
+
+        <div class="control-panel">
+            <h2>波形发生器</h2>
+            <button class="button" onclick="setWave('sine')">正弦波</button>
+            <button class="button" onclick="setWave('triangle')">三角波</button>
+            <button class="button" onclick="setWave('square')">方波</button>
+            <button class="button stop" onclick="setWave('stop')">停止</button>
+            
+            <div class="freq-control">
+                <h3>频率控制</h3>
+                <input type="range" id="freqSlider" min="0.1" max="100" step="0.1" value="1" 
+                       oninput="updateFreq(this.value)">
+                <span id="freqValue">1.0 Hz</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 图表初始化
+        const ctx = document.getElementById('voltageChart').getContext('2d');
+        const maxDataPoints = 50;
+        const chartData = {
+            labels: Array(maxDataPoints).fill(''),
+            datasets: [{
+                label: '电压 (V)',
+                data: Array(maxDataPoints).fill(0),
+                borderColor: 'rgb(75, 192, 192)',
+                tension: 0.1
+            }]
+        };
+
+        const chartConfig = {
+            type: 'line',
+            data: chartData,
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 3.3
+                    }
+                },
+                animation: false
+            }
+        };
+
+        const chart = new Chart(ctx, chartConfig);
+
+        // WebSocket处理
+        const ws = new WebSocket('ws://' + window.location.hostname + '/ws');
+        const statusDiv = document.getElementById('status');
+        const freqValue = document.getElementById('freqValue');
+        let currentWave = null;
+
+        ws.onopen = function() {
+            statusDiv.textContent = '状态: 已连接';
+            statusDiv.style.color = 'green';
+        };
+
+        ws.onmessage = function(event) {
+            const message = event.data;
+            
+            // 处理串口数据
+            if (message.startsWith('data=')) {
+                const voltage = parseFloat(message.substring(5));
+                chartData.datasets[0].data.push(voltage);
+                chartData.datasets[0].data.shift();
+                chart.update('none');
+            }
+        };
+
+        ws.onclose = function() {
+            statusDiv.textContent = '状态: 连接已断开';
+            statusDiv.style.color = 'red';
+        };
+
+        ws.onerror = function() {
+            statusDiv.textContent = '状态: 连接错误';
+            statusDiv.style.color = 'red';
+        };
+
+        function setWave(type) {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send('wave=' + type);
+                currentWave = type;
+                
+                // 更新按钮状态
+                document.querySelectorAll('.button').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                if (type !== 'stop') {
+                    event.target.classList.add('active');
+                }
+            }
+        }
+
+        function updateFreq(value) {
+            freqValue.textContent = value + ' Hz';
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send('freq=' + value);
+            }
+        }
+    </script>
+</body>
+</html>
